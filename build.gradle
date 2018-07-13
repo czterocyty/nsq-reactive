@@ -1,0 +1,53 @@
+buildscript {
+
+    ext {
+        reactorVersion = "3.2.0.M1"
+        log4jVersion = "2.6.2"
+        nettyTCNativeVersion = "2.0.12.Final"
+    }
+
+    repositories {
+        jcenter()
+    }
+
+    dependencies {
+        classpath "com.avast.gradle:gradle-docker-compose-plugin:0.7.1"
+    }
+}
+
+apply plugin: 'java-library'
+apply plugin: "docker-compose"
+
+group 'org.czterocyty'
+version '0.1-SNAPSHOT'
+
+sourceCompatibility = 1.8
+
+repositories {
+    maven {
+        url 'http://repo.spring.io/milestone'
+    }
+    mavenCentral()
+    mavenLocal()
+}
+
+dependencies {
+    api "io.projectreactor:reactor-core:${reactorVersion}"
+    api "org.apache.logging.log4j:log4j-api:${log4jVersion}"
+    implementation "org.apache.logging.log4j:log4j-core:${log4jVersion}"
+    implementation "io.netty:netty-all:4.1.15.Final"
+    implementation "com.google.guava:guava:19.0"
+    implementation "com.fasterxml.jackson.core:jackson-databind:2.6.7"
+    implementation "org.apache.commons:commons-pool2:2.4.2"
+
+    testImplementation "com.novocode:junit-interface:0.8"
+    testImplementation "io.netty:netty-tcnative:${nettyTCNativeVersion}:linux-x86_64"
+    testImplementation "io.projectreactor:reactor-test:${reactorVersion}"
+}
+
+dockerCompose.isRequiredBy(test)
+
+dockerCompose {
+    useComposeFiles = ['src/test/docker/docker-compose.yml']
+    stopContainers = false
+}

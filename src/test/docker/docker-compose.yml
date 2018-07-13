@@ -1,0 +1,29 @@
+---
+version: '2'
+services:
+  nsqlookup:
+    image: nsqio/nsq:v0.3.8
+    hostname: nsqlookup
+    ports:
+      - "4160:4160"
+      - "4161:4161"
+    command: /nsqlookupd
+
+  nsq:
+    image: nsqio/nsq:v0.3.8
+    hostname: nsq
+    ports:
+      - "4150:4150"
+      - "4151:4151"
+    links:
+      - nsqlookup:nsqlookup
+    command: /nsqd --broadcast-address nsq --lookupd-tcp-address=nsqlookup:4160 -msg-timeout=5s
+
+  nsqadmin:
+    image: nsqio/nsq:v0.3.8
+    hostname: nsqadmin
+    links:
+      - nsqlookup:nsqlookup
+    ports:
+      - "4171:4171"
+    command: /nsqadmin --lookupd-http-address=nsqlookup:4161
