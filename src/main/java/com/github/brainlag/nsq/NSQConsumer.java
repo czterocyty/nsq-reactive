@@ -12,7 +12,6 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.core.jmx.Server;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -22,6 +21,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -29,6 +29,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class NSQConsumer implements Closeable {
@@ -50,6 +51,8 @@ public class NSQConsumer implements Closeable {
     private ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private Executor executor = Executors.newCachedThreadPool();
     private Optional<ScheduledFuture<?>> timeout = Optional.empty();
+    private final AtomicBoolean closing = new AtomicBoolean(false);
+    private final ConcurrentLinkedQueue<Long> demands = new ConcurrentLinkedQueue<>();
 
     public NSQConsumer(final NSQLookup lookup, final String topic, final String channel, final NSQMessageCallback callback) {
         this(lookup, topic, channel, callback, new NSQConfig());
@@ -80,11 +83,22 @@ public class NSQConsumer implements Closeable {
     public NSQConsumer start() {
         if (!started) {
             started = true;
+            demands.offer(Long.MAX_VALUE);
             //connect once otherwise we might have to wait one lookupPeriod
             connect();
             scheduler.scheduleAtFixedRate(() -> connect(), lookupPeriod, lookupPeriod, TimeUnit.MILLISECONDS);
         }
         return this;
+    }
+
+    public void startButWaitForDemand() {
+        if (!started) {
+            started = true;
+            //connect once otherwise we might have to wait one lookupPeriod
+            connect();
+            scheduler.scheduleAtFixedRate(() -> connect(), lookupPeriod, lookupPeriod, TimeUnit.MILLISECONDS);
+            scheduler.scheduleAtFixedRate(() -> fulfillDemand(), 50L, 50L, TimeUnit.MILLISECONDS);
+        }
     }
 
     private Connection createConnection(final ServerAddress serverAddress) {
@@ -94,7 +108,14 @@ public class NSQConsumer implements Closeable {
             connection.setConsumer(this);
             connection.setErrorCallback(errorCallback);
             connection.command(NSQCommand.subscribe(topic, channel));
-            connection.command(NSQCommand.ready(messagesPerBatch));
+            Long actualDemand = demands.peek();
+            if (actualDemand != null) {
+                if (actualDemand == Long.MAX_VALUE) {
+                    connection.command(NSQCommand.ready(messagesPerBatch));
+                } else {
+                    connection.command(NSQCommand.ready(actualDemand.intValue()));
+                }
+            }
 
             return connection;
         } catch (final NoConnectionsException e) {
@@ -104,6 +125,11 @@ public class NSQConsumer implements Closeable {
             LogManager.getLogger(this).warn("Unknown server {}", serverAddress.toString(), e);
             return null;
         }
+    }
+
+    private boolean isInfiniteDemand() {
+        Long lastDemand = demands.peek();
+        return (lastDemand != null && lastDemand == Long.MAX_VALUE);
     }
 
     protected void processMessage(final NSQMessage message) {
@@ -123,9 +149,11 @@ public class NSQConsumer implements Closeable {
         }
 
         final long tot = totalMessages.incrementAndGet();
-        if (tot % messagesPerBatch > (messagesPerBatch / 2)) {
-            //request some more!
-            rdy(message, messagesPerBatch);
+        if (isInfiniteDemand()) {
+            if (tot % messagesPerBatch > (messagesPerBatch / 2)) {
+                //request some more!
+                rdy(message, messagesPerBatch);
+            }
         }
     }
 
@@ -147,6 +175,32 @@ public class NSQConsumer implements Closeable {
         message.getConnection().command(NSQCommand.ready(size));
     }
 
+    public void signalDemand(long requests) {
+        if (requests > 1000 && requests < Long.MAX_VALUE) {
+            requests = 1000;
+        }
+        demands.offer(requests);
+
+        // TODO: notify
+    }
+
+    private void fulfillDemand() {
+        // TODO: this should work
+        connections.values().stream()
+                .filter(Connection::isConnected)
+                .findFirst()
+                .ifPresent(connection -> {
+                    Long demand = demands.poll();
+                    if (demand != null) {
+                        if (demand == Long.MAX_VALUE) {
+                            connection.command(NSQCommand.ready(messagesPerBatch));
+                        } else {
+                            connection.command(NSQCommand.ready(demand.intValue()));
+                        }
+                    }
+                });
+    }
+
     private Date calculateTimeoutDate(final long i) {
         if (System.currentTimeMillis() - nextTimeout + i > 50) {
             nextTimeout += i;
@@ -158,8 +212,10 @@ public class NSQConsumer implements Closeable {
     }
 
     public void shutdown() {
-        scheduler.shutdown();
-        cleanClose();
+        if (closing.compareAndSet(false, true)) {
+            scheduler.shutdown();
+            cleanClose();
+        }
     }
 
     private void cleanClose() {
@@ -176,6 +232,8 @@ public class NSQConsumer implements Closeable {
             }
         } catch (final TimeoutException e) {
             LogManager.getLogger(this).warn("No clean disconnect", e);
+        } finally {
+            started = false;
         }
     }
 

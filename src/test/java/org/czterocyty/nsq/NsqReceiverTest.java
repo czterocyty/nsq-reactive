@@ -8,6 +8,7 @@ import org.junit.Test;
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
+import java.time.Duration;
 import java.util.concurrent.TimeoutException;
 
 public class NsqReceiverTest {
@@ -17,17 +18,19 @@ public class NsqReceiverTest {
     @Test
     public void receive() throws Exception {
         Flux<NSQMessage> messages = NsqReceiver.receive(new NsqReceiverOptions()
-                .lookupAddress(Nsq.getNsqLookupdHost(), 4161)
-                .topic(TOPIC_NAME)
-                .channel("channel"));
+                    .lookupAddress(Nsq.getNsqLookupdHost(), 4161)
+                    .topic(TOPIC_NAME)
+                    .channel("channel")
+                .stopOnConnectionError());
 
         produceMessage();
 
         StepVerifier.create(messages)
-                .consumeNextWith(NSQMessage::finished)
+                .thenRequest(1)
                 .expectNextMatches(msg -> "test-one-message".equals(new String(msg.getMessage())))
+                .consumeNextWith(NSQMessage::finished)
                 .thenCancel()
-                .verify();
+                .verify(Duration.ofSeconds(5));
     }
 
     private void produceMessage() throws NSQException, TimeoutException {

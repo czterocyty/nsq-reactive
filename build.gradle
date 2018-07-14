@@ -43,10 +43,33 @@ dependencies {
     testImplementation "com.novocode:junit-interface:0.8"
     testImplementation "io.netty:netty-tcnative:${nettyTCNativeVersion}:linux-x86_64"
     testImplementation "io.projectreactor:reactor-test:${reactorVersion}"
-    // testImplementation "org.apache.logging.log4j:log4j-slf4j-impl:${log4jVersion}"
+    testImplementation "org.reactivestreams:reactive-streams-tck:1.0.2"
 }
 
+test {
+    useJUnit()
+}
+
+task testng(type: Test) {
+    group "verification"
+
+    useTestNG()
+
+    scanForTestClasses = false
+    include "**/*TestNG.class"
+}
+
+tasks.withType(Test) {
+    testLogging {
+        events "passed", "skipped", "failed"
+        showStandardStreams = false
+    }
+}
+
+check.dependsOn testng
+
 dockerCompose.isRequiredBy(test)
+dockerCompose.isRequiredBy(testng)
 
 dockerCompose {
     useComposeFiles = ['src/test/docker/docker-compose.yml']

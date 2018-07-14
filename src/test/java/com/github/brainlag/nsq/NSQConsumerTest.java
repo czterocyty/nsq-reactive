@@ -11,8 +11,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
+@Ignore
 public class NSQConsumerTest {
 
     //duration to wait before auto-requeing a message setting in nsqd, defined with -msg-timeout:

@@ -20,9 +20,10 @@ public class NsqReceiver {
                         }
                     });
 
+            sink.onRequest(consumer::signalDemand);
             sink.onDispose(consumer::shutdown);
 
-            consumer.start();
+            consumer.startButWaitForDemand();
         });
     }
 }
