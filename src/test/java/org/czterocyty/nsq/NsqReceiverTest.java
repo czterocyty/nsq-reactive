@@ -15,8 +15,10 @@ public class NsqReceiverTest {
 
     private static final String TOPIC_NAME = "receiver";
 
+    private static final long NSQ_MSG_TIMEOUT = 5000;
+
     @Test
-    public void receive() throws Exception {
+    public void receiveSingleMessage() throws Exception {
         Flux<NSQMessage> messages = NsqReceiver.receive(new NsqReceiverOptions()
                     .lookupAddress(Nsq.getNsqLookupdHost(), 4161)
                     .topic(TOPIC_NAME)
@@ -31,6 +33,33 @@ public class NsqReceiverTest {
                 .consumeNextWith(NSQMessage::finished)
                 .thenCancel()
                 .verify(Duration.ofSeconds(5));
+    }
+
+    @Test
+    public void receiveThenTouchThenCommit() throws Exception {
+        Flux<NSQMessage> messages = NsqReceiver.receive(new NsqReceiverOptions()
+                .lookupAddress(Nsq.getNsqLookupdHost(), 4161)
+                .topic(TOPIC_NAME)
+                .channel("channel")
+                .stopOnConnectionError());
+
+        Flux<NSQMessage> messageProcessedFiveTimes = Flux.interval(
+                Duration.ofMillis(NSQ_MSG_TIMEOUT / 5 + 500))
+            .take(5)
+            .zipWith(messages, (left, right) -> right)
+            .doOnNext(NSQMessage::touch);
+
+        produceMessage();
+
+        StepVerifier.create(messageProcessedFiveTimes)
+                .thenRequest(5)
+                .expectNextMatches(msg -> {
+                    return "test-one-message".equals(new String(msg.getMessage()))
+                        && msg.getAttempts() == 1;
+                })
+                .consumeNextWith(NSQMessage::finished)
+                .thenCancel()
+                .verify(Duration.ofSeconds(10));
     }
 
     private void produceMessage() throws NSQException, TimeoutException {
