@@ -44,6 +44,8 @@ dependencies {
     testImplementation "io.netty:netty-tcnative:${nettyTCNativeVersion}:linux-x86_64"
     testImplementation "io.projectreactor:reactor-test:${reactorVersion}"
     testImplementation "org.reactivestreams:reactive-streams-tck:1.0.2"
+    testImplementation "nl.jqno.equalsverifier:equalsverifier:2.4.8"
+    testImplementation "org.apache.logging.log4j:log4j-slf4j-impl:${log4jVersion}"
 }
 
 test {
